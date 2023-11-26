@@ -1,0 +1,243 @@
+---
+title: "Innvate Challange"
+output:pdf
+  pdf_document: default
+  html_notebook: default
+---
+
+
+#### Load packages
+```{r}
+library(tidyverse)
+
+
+```
+
+
+#### Import data
+```{r}
+hous_pricing <- read_csv("housing.csv")
+head(hous_pricing)
+```
+##### Data structure
+```{r}
+glimpse (hous_pricing)
+```
+##### Summary statistics
+```{r}
+summary(hous_pricing)
+```
+
+```{r}
+# Assuming 'housing' is your dataset
+# Load necessary libraries
+library(ggplot2)
+
+# Plotting longitude and latitude to visualize housing locations
+ggplot(hous_pricing, aes(x = longitude, y = latitude)) +
+  geom_point(alpha = 0.4, aes(color = median_house_value)) +
+  scale_color_gradient(low = "blue", high = "red") +
+  labs(title = "Housing Locations", x = "Longitude", y = "Latitude")
+```
+
+
+```{r}
+any(is.na(hous_pricing))
+missing_values <- which(is.na(hous_pricing),arr.ind = TRUE)
+print(missing_values )
+```
+
+So from that summary we can see a few things we need to do before actually running algorithms.
+
+NA's in total_bedrooms need to be addressed. These must be given a value
+
+We will transform  the ocean_proximity into numrical varaible . 
+
+Make the total_bedrooms and total_rooms into a mean_number_bedrooms and mean_number_rooms columns as there are likely more accurate depictions of the houses in a given group
+### visualizing the data
+
+```{r}
+ggplot(data=melt(hous_pricing), mapping=aes(x=value))+
+    geom_histogram(bins=300)+
+    facet_wrap(~variable,scales='free_x')
+```
+We can see that longitude and latitude are concentrated around major cities like Los Angeles, San Francisco or San Diego, which indicates that the majority of housing is in these urban areas.
+- Median age of dwelling ranges from 1 to 52 years, with an average of 28 years. This suggests that the housing stock is relatively old and that there are few recent constructions.
+- The total number of rooms and chambers follows an asymmetrical distribution to the right, with a strong presence of extreme values. This means that there are some very spacious dwellings that increase the average, but most of the dwellings are of modest size.
+The population and number of households are also distributed asymmetrically to the right, with maximum values above 30,000 and 6,000 respectively. This reflects the high population density in some areas, as well as the diversity of household types (families, singles, flatshares, etc.).
+- Median income follows a normal distribution with an average of $38,000 and a standard deviation of $12,000. This indicates that the income distribution is fairly homogeneous and that there are no large disparities between social classes.
+- The median value of the dwelling also follows a normal distribution, with an average of $207,000 and a standard deviation of $115,000. This shows that housing prices are correlated with median income, but there is also an influence of other factors such as location, size or age of housing.
+check the missing values
+```{r}
+summary(hous_pricing$total_bedrooms)
+```
+```{r}
+hous_pricing$total_bedrooms[is.na(hous_pricing$total_bedrooms)]= median(hous_pricing$total_bedrooms, na.rm=TRUE)
+summary(hous_pricing$total_bedrooms)
+```
+Turn categoricals into numeric
+```{r}
+hous_pricing <-hous_pricing%>%
+  mutate(ocean_proximity = as.numeric(factor(ocean_proximity)))
+ hous_pricing
+```
+```{r}
+hous_pricing <-hous_pricing%>%
+  mutate(mean_bedrooms=total_bedrooms/households)%>%
+  mutate(mean_rooms=total_rooms/households)%>%
+select(-total_rooms)%>%
+select(-total_bedrooms)
+hous_pricing
+
+
+```
+### calculat the correlation between the variables
+```{r}
+cor(hous_pricing)
+```
+```{r}
+
+library(corrplot)
+M = cor(hous_pricing)
+corrplot(M)
+```
+## The regrission model
+```{r}
+library(rsample)
+set.seed(222)
+# Save the split information for an 80/20 split of the data
+housing1_split <- initial_split(hous_pricing, prop = 0.80)
+housing1_split
+
+```
+
+#### Split the dataset into training and testing 
+```{r}
+housing1_train <- training(housing1_split)
+housing1_test  <-  testing(housing1_split)
+
+dim(housing1_train)
+dim(housing1_test)
+```
+
+
+```{r}
+lm_model <- lm(formula =median_house_value ~., data = housing1_train)
+
+```
+#### Train the model using the selected features and the target variable
+```{r}
+library(broom)
+tidy(summary(lm_model)) 
+
+```
+
+###  Model Evaluation
+
+#### 1. Make predictions on the test dataset using the trained model
+```{r}
+predictions1 <- predict(lm_model, newdata = housing1_test)
+predictions1
+```
+
+2. Evaluate the model's performance using appropriate metrics (e.g., RMSE, MSE, R-squared)
+
+
+
+#### Training MSE and RMSE
+```{r}
+#RMSE
+sigma(lm_model)
+#MSE
+sigma(lm_model)^2
+```
+
+
+#### Tesintg MSE and RMSE
+```{r}
+class(predictions)
+slice_head(housing1_test, n = 4)
+```
+
+### testing MSE
+```{r}
+mean((housing1_test$median_house_value - predictions1)^2)
+
+```
+```{r}
+pred.lm <- predict(lm_model,housing1_test)
+results <- cbind(pred.lm,housing1_test$median_house_value)
+colnames(results) <- c('predicted','actual')
+results <- as.data.frame(results)
+head(results)
+rmse.lm <- sqrt(sum((pred.lm - housing1_test$median_house_value)^2)/length(housing1_test$median_house_value))
+
+c(RMSE = rmse.lm, R2 = summary(lm_model)$r.squared)
+```
+RMSE is 614.4449172, which is quite high and indicates that the model tends to make significant errors in predicting house prices in California.
+R2 is 0.6417267, which is pretty good and indicates that the model captures about 64% of the variation in house prices in California
+
+#### 3. Visualize the actual vs. predicted sales
+```{r}
+data.frame(actual = housing1_test$median_house_value,predicted = predictions1) %>% 
+  ggplot(aes(x= actual, y= predicted ))+
+  geom_point(color= "orange", size= 3 )+
+  labs(title = " Actual vs. Predicted house value")+
+  geom_smooth(method = "lm", color ="black", se = FALSE)+
+  theme_minimal()
+
+
+```
+## Random Forest Model
+```{r}
+#install.packages("randomForest")
+library(randomForest)
+```
+
+```{r}
+hous_pricing <- hous_pricing %>%
+      mutate(median_house_value = as.numeric(median_house_value))
+```
+```{r}
+library(caTools)
+library(rsample)
+```
+
+
+```{r}
+set.seed(123)  # for reproducibility
+housing_split <- initial_split(hous_pricing, prop = 0.80)
+housing_train <- training(housing_split)
+housing_test  <-  testing(housing_split)
+
+dim(housing_train)
+dim(housing_test)
+```
+
+
+```{r}
+
+rf_model <- randomForest(median_house_value ~., data = housing_train, importance=TRUE,
+                        proximity=TRUE)
+
+```
+```{r}
+print(rf_model )
+```
+
+```{r}
+predictions <- predict(rf_model, housing_test)
+```
+
+
+
+
+```{r}
+confusion_matrix <- table(predictions, housing_test$median_house_value)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", round(accuracy, 4)))
+```
+a precision of the random forest model is 7-04, which is very low and indicates that the model is not able to correctly predict house prices in California.
+# Evaluate accuracy
+the regrssion model is more representative then rendom forest   
+
